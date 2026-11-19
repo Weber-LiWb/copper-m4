@@ -14,6 +14,13 @@ import {
 } from "@/lib/copper/catalog";
 import { DOCUMENTS, pageUrl } from "@/lib/copper/documents";
 import { readInventory } from "@/lib/copper/inventory";
+import {
+  CUSTOMER,
+  decideRefund,
+  getOrders,
+  type RefundState,
+  statusOf,
+} from "@/lib/copper/orders";
 import { PASSAGES } from "@/lib/copper/passages";
 
 export type ProductList = {
@@ -231,6 +238,41 @@ export async function searchDocs(query: string): Promise<DocSearchResult> {
       };
     });
   return { matches };
+}
+
+/** Copper's way to pass a refund request to the Refund agent (Module 4). */
+export const transferTool = {
+  transfer_to_refund_agent: tool({
+    description:
+      "Hands the customer to the Refund agent. Use it whenever the customer wants a refund or their money back on an order.",
+    inputSchema: z.object({}),
+    execute: async () => ({ handedTo: "Refund agent" }),
+  }),
+};
+
+/** The Refund agent's own tools. They read the console's state for this question. */
+export function refundTools(state: RefundState) {
+  return {
+    get_orders: tool({
+      description: `Lists ${CUSTOMER}'s orders with each order number, item, amount and refund status.`,
+      inputSchema: z.object({}),
+      execute: async () => ({
+        customer: CUSTOMER,
+        orders: getOrders().map((order) => ({
+          ...order,
+          status: statusOf(state, order.id),
+        })),
+      }),
+    }),
+    request_refund: tool({
+      description:
+        "Asks the app to refund one order. The app decides: small refunds go through at once, larger ones wait for a person to approve them.",
+      inputSchema: z.object({
+        orderId: z.string().describe("The order number, e.g. '1002'."),
+      }),
+      execute: async ({ orderId }) => decideRefund(orderId, state),
+    }),
+  };
 }
 
 export const copperTools = {

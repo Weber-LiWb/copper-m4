@@ -139,3 +139,42 @@ second agent, and a person approving the large ones.
 |---|---|---|
 | Page | `app/support/page.tsx` | The "Refund Console" title and nothing else yet, linked from the header as Support |
 | Chat panel | `components/copper/ask-copper.tsx` | With the `docked` prop it starts open and the page beside it stays clickable. It is the same single agent and tools as on the home page |
+
+## Module 4: Refunds and the Refund agent
+
+**Summary:** The Refund Console lists the customer's orders, an auto-refund
+limit ($100 by default) and the refunds waiting for a person. In the chat,
+Copper hands refund requests to a second agent, the Refund agent. Code refunds
+anything at or under the limit on its own; anything larger waits until a
+person clicks Approve or Reject, and the chat tells the customer what they
+decided.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Page | `app/support/page.tsx` | Wraps the console and the docked chat in `RefundsProvider`, so both share one state |
+| Console | `components/copper/refunds.tsx` | `RefundsProvider` (limit, order statuses, decisions; saved in `localStorage` as `copper-refunds`) and `RefundConsole`: the limit input, the "Waiting for your approval" queue with Approve / Reject, the orders table and a Reset demo button |
+| Orders and rule | `lib/copper/orders.ts` | `getOrders()`: four orders priced from the catalog. `decideRefund()`: the rule, in code (at or under the limit → `refunded`, over → `pending_approval`, already handled → says so). `decisionMessage()`: what the Refund agent says after Approve / Reject |
+| Hand-off | `lib/copper/assistant/ask.ts`, `tools.ts` | On the Support page Copper also gets `transfer_to_refund_agent`. Copper's stream stops at that call (`hasToolCall`) and a second stream starts with `REFUND_INSTRUCTIONS` and only `get_orders` and `request_refund`. Both run in one answer; the panel draws a hand-off station between them and labels the reply "Refund agent" |
+| Chat panel | `components/copper/ask-copper.tsx` | Sends the console's limit and statuses with each question, applies each `request_refund` result to the console, and adds a Refund-agent message when a person decides |
+| AI calls | `{ module: 2, feature: "ask-copper" }`, `{ module: 4, feature: "refund-agent" }` | One Copper stream (usually one step: the hand-off) plus one Refund-agent stream (`request_refund`, then the reply). Approve / Reject call no model |
+
+**Data flow:** customer asks for a refund → Copper calls
+`transfer_to_refund_agent` → Refund agent calls `request_refund` →
+`decideRefund()` compares the catalog price with the limit → refunded, or
+queued in the console → a person clicks Approve or Reject → the order's status
+changes and the Refund agent's message appears in the chat.
+
+**Decisions and trade-offs:** The model never decides a refund: it can only
+ask, and code compares the amount with the limit, so a persuasive customer
+can't talk it past the limit. A person makes the call above the limit. The
+state lives in the browser instead of a database, so the server stays
+stateless and works on Vercel with no new service; each visitor gets their
+own demo. The Approve / Reject message is fixed text, not a model call: it is
+always accurate and costs nothing.
+
+**Risks and open questions:** The limit and order statuses come from the
+browser, so a real store would keep them on the server and check who is
+allowed to approve (authentication arrives in a later module). There is one
+demo customer, and refunds aren't sent to a payment provider. Each refund
+question costs two model calls' worth of steps, which matters on the free
+Gemini tier.
